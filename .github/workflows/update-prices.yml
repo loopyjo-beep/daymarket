@@ -1,0 +1,43 @@
+# 평일 한국 시간 14:10에 지원 종목의 일별 종가를 받아 data/prices/ 를 갱신한다.
+# (국내 공공데이터는 거래 다음 영업일 13시 이후, 미국은 한국 시간 아침에 전날 종가가 나온다)
+# 필요한 비밀값: DATA_GO_KR_KEY(공공데이터포털 일반 인증키 Decoding), MARKETSTACK_KEY
+# 수동 실행 시 backfill을 고르면 과거 기간을 처음부터 다시 받는다.
+name: update-prices
+on:
+  schedule:
+    - cron: '10 5 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: '과거 기간 다시 받기 (none / us / kr / all)'
+        required: false
+        default: 'none'
+permissions:
+  contents: write
+concurrency:
+  group: data-commit
+  cancel-in-progress: false
+jobs:
+  prices:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fetch prices
+        env:
+          DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+          MARKETSTACK_KEY: ${{ secrets.MARKETSTACK_KEY }}
+          US_BACKFILL: ${{ (github.event.inputs.backfill == 'us' || github.event.inputs.backfill == 'all') && '1' || '0' }}
+          KR_BACKFILL: ${{ (github.event.inputs.backfill == 'kr' || github.event.inputs.backfill == 'all') && '1' || '0' }}
+        run: node scripts/fetch-prices.mjs
+      - name: Commit if changed
+        run: |
+          git config user.name "price-bot"
+          git config user.email "price-bot@users.noreply.github.com"
+          git add data/prices
+          if git diff --cached --quiet; then echo "변경 없음"; exit 0; fi
+          git commit -m "시세 갱신 $(date -u +%F)"
+          git pull --rebase origin main
+          git push

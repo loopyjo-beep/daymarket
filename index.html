@@ -13,7 +13,7 @@
 @media (prefers-color-scheme:dark){:root{--bg:#101215;--card:#1c1f24;--ink:#f2f4f6;--sub:#b0b8c1;--faint:#8b95a1;--line:#2c3036;--soft:#26292f;--up:#ff6b78;--down:#5ea2ff;--accent:#5ea2ff;--accentSoft:#1d2b40;--accentInk:#8cc0ff;--brand:#3d8bff;--brandInk:#fff;--chip:#1c1f24;--warn:#30290f;--warnInk:#f0d68a;--shadow:none}}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;-webkit-font-smoothing:antialiased;letter-spacing:-.01em}
+body{margin:0;padding-top:env(safe-area-inset-top);background:var(--bg);color:var(--ink);font:16px/1.55 "Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;-webkit-font-smoothing:antialiased;letter-spacing:-.01em}
 main{max-width:520px;margin:0 auto;padding:20px 16px 72px}
 .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:28px}
 .logo{font-weight:800;font-size:17px;letter-spacing:-.03em}
@@ -213,6 +213,7 @@ select{width:100%;height:52px;padding:0 10px;border:1.5px solid var(--line);bord
     <div class="big" id="value"></div>
     <div class="delta" id="pl"></div>
     <div class="meta" id="meta"></div>
+    <div class="fxwarn hidden" id="pxWarn" role="alert"><b>실제 주가가 아니에요.</b> 이 종목의 시세 파일이 아직 없어 가상 주가로 계산했어요.</div>
     <div style="margin-top:16px" id="chart"></div>
     <div class="verdict" id="verdict"></div>
     <div class="goods" id="goods"><span class="gi" id="gIc"></span><span><small id="gTitle"></small><b id="gDesc"></b></span></div>
@@ -368,7 +369,7 @@ const FxAPI=(()=>{
     if(a<0||(new Date(date)-new Date(st.ds[a]))/86400000>10)return null;return{date:st.ds[a],rate:Math.round(st.v[a]*100)/100};}
   return{ensure,at,get name(){return st?st.name:'불러오는 중'},get live(){return !!(st&&st.live)}};
 })();
-FxAPI.ensure().then(()=>{const n=$('srcNote');if(n)n.textContent=`주가: ${PriceAPI.name} · 환율: ${FxAPI.name}`;const b=document.querySelector('.demo');if(b)b.textContent=FxAPI.live?'데모 · 가상 주가 · 실제 환율':'데모 · 가상 시세';});
+
 
 const MockProvider=(()=>{
   const days=tradingDays();const cache={};
@@ -393,6 +394,7 @@ const MockProvider=(()=>{
       .map(x=>({symbol:x.s,name:x.n,market:x.m,currency:x.m==='KR'?'KRW':'USD'}));},
     async close(sym,date){await wait();const meta=SYMBOLS.find(x=>x.s===sym);const i=idx(date);if(i<0)return null;
       const v=gen(sym,stockCfg(meta.m))[i];return{date:days[i],close:meta.m==='KR'?Math.round(v/10)*10:Math.round(v*100)/100};},
+    fxRate(date){const i=idx(date);return i<0?null:gen('USDKRW',fxCfg)[i];},
     async fx(date){await FxAPI.ensure();const real=FxAPI.at(date);if(real)return real;if(FxAPI.live)return null;
       await wait();const i=idx(date);if(i<0)return null;return{date:days[i],rate:Math.round(gen('USDKRW',fxCfg)[i]*100)/100};},
     /* 보유 기간 중 평가금액이 가장 높았던 날(원화는 환율 포함, 달러는 주가만). 실제 API에서는 일별 시세로 같은 계산을 한다 */
@@ -407,11 +409,55 @@ const MockProvider=(()=>{
   };
 })();
 
-/* 실제 API로 바꿀 때 예시 (미구현, 엔드포인트와 응답 형식은 업체 문서로 확인 필요)
-const RealProvider={
-  name:'Marketstack', async search(q){...}, async close(sym,date){...}, async fx(date){...수출입은행...}, async series(sym,from,to){...}
-};*/
-const PriceAPI=MockProvider;
+/* ===== 1-2. 실제 주가 계층 =====
+   GitHub Actions(scripts/fetch-prices.mjs)가 매일 받아 두는 data/prices/<종목>.json 을 읽는다.
+   국내: 금융위원회 주식시세정보, 미국: Marketstack. 액면분할은 파일의 splits로 분할 전 가격을 나눠 맞춘다.
+   파일이 없는 종목은 가상 주가로 계산하고 결과 화면에 경고를 띄운다.
+   앱(안드로이드)이나 파일로 열었을 때는 데이터를 웹 주소에서 가져온다. */
+const DATA_BASE=(window.Capacitor||location.protocol==='file:')?'https://loopyjo-beep.github.io/daymarket/':'';
+const PriceAPI=(()=>{
+  let idx=null,loading=null;const files={};
+  async function ensure(){
+    if(idx)return idx;
+    loading=loading||(async()=>{try{const r=await fetch(DATA_BASE+'data/prices/index.json',{cache:'no-cache'});if(!r.ok)throw new Error(r.status);idx=(await r.json()).symbols||{};}
+      catch(e){console.debug('[price] index',e&&e.message);idx={};}return idx;})();
+    return loading;}
+  function file(sym){
+    files[sym]=files[sym]||(async()=>{const r=await fetch(DATA_BASE+`data/prices/${sym}.json`,{cache:'no-cache'});if(!r.ok)throw new Error(r.status);const j=await r.json();
+      const sp=(j.splits||[]).slice().sort((a,b)=>a[0]<b[0]?-1:1);const c=new Array(j.d.length);let f=1,k=sp.length-1;
+      for(let i=j.d.length-1;i>=0;i--){while(k>=0&&sp[k][0]>j.d[i]){f*=sp[k][1];k--;}c[i]=j.c[i]/f;}
+      return{d:j.d,c,market:j.market};})();
+    return files[sym];}
+  const bs=(arr,date)=>{let lo=0,hi=arr.length-1,a=-1;while(lo<=hi){const m=lo+hi>>1;if(arr[m]<=date){a=m;lo=m+1;}else hi=m-1;}return a;};
+  const rp=(v,m)=>m==='KR'?Math.round(v):Math.round(v*10000)/10000;
+  const fxOf=d=>{const r=FxAPI.at(d);return r?r.rate:MockProvider.fxRate(d);};
+  const live=sym=>!!(idx&&idx[sym]);
+  return{
+    ensure,live,
+    anyLive:()=>!!(idx&&Object.keys(idx).length),
+    firstOf:sym=>idx&&idx[sym]?idx[sym].first:null,
+    get name(){if(!idx||!Object.keys(idx).length)return MockProvider.name;const ms=new Set(Object.values(idx).map(x=>x.market));
+      return [ms.has('KR')&&'국내 금융위원회 주식시세정보',ms.has('US')&&'미국 Marketstack'].filter(Boolean).join(' · ')+' (종가)';},
+    firstDate:START,
+    search:q=>MockProvider.search(q),
+    fx:d=>MockProvider.fx(d),
+    async close(sym,date){await ensure();if(!live(sym))return MockProvider.close(sym,date);
+      const f=await file(sym),i=bs(f.d,date);if(i<0)return null;return{date:f.d[i],close:rp(f.c[i],f.market)};},
+    async series(sym,from,to){await ensure();if(!live(sym))return MockProvider.series(sym,from,to);await FxAPI.ensure();
+      const f=await file(sym),a=Math.max(0,bs(f.d,from)),b=bs(f.d,to);const out=[];const step=Math.max(1,Math.floor((b-a)/120)||1);
+      for(let i=a;i<=b;i+=step)out.push({date:f.d[i],close:f.c[i],fx:fxOf(f.d[i])});
+      if(out.length&&out[out.length-1].date!==f.d[b])out.push({date:f.d[b],close:f.c[b],fx:fxOf(f.d[b])});return out;},
+    async extremes(sym,from,to,useFx){await ensure();if(!live(sym))return MockProvider.extremes(sym,from,to,useFx);await FxAPI.ensure();
+      const f=await file(sym),a=Math.max(0,bs(f.d,from)),b=bs(f.d,to);const rf=v=>Math.round(v*100)/100;
+      const val=i=>rp(f.c[i],f.market)*(useFx?rf(fxOf(f.d[i])):1);let hi=a,lo=a;
+      for(let i=a;i<=b;i++){const v=val(i);if(v>val(hi))hi=i;if(v<val(lo))lo=i;}
+      const pt=i=>({date:f.d[i],close:rp(f.c[i],f.market),fx:rf(fxOf(f.d[i]))});return{high:pt(hi),low:pt(lo)};}
+  };
+})();
+function paintBadge(){const b=document.querySelector('.demo');if(!b)return;const p=PriceAPI.anyLive(),x=FxAPI.live;
+  b.textContent=p&&x?'베타 · 실제 시세(종가)':p?'베타 · 실제 주가 · 가상 환율':x?'데모 · 가상 주가 · 실제 환율':'데모 · 가상 시세';
+  const n=$('srcNote');if(n)n.textContent=`주가: ${PriceAPI.name} · 환율: ${FxAPI.name}`;}
+Promise.all([PriceAPI.ensure(),FxAPI.ensure()]).then(paintBadge);
 
 /* ===== 2. 계산 ===== */
 /* 환전 비용 가정: 매매기준율 ± 0.5%. 증권사 기본 스프레드 1%와 우대 95%(0.05%)의 중간값.
@@ -498,7 +544,7 @@ $('q').addEventListener('keydown',e=>{const L=$('list');if(L.classList.contains(
   e.preventDefault();items.forEach((d,i)=>d.classList.toggle('act',i===act));});
 $('list').addEventListener('mousedown',e=>{const d=e.target.closest('[data-i]');if(d)choose($('list')._r[+d.dataset.i]);});
 $('q').addEventListener('blur',()=>setTimeout(()=>$('list').classList.add('hidden'),150));
-function choose(x){pick=x;$('q').value=x.name;$('list').classList.add('hidden');syncChips();}
+function choose(x){pick=x;$('q').value=x.name;$('list').classList.add('hidden');$('d0').min=PriceAPI.firstOf(x.symbol)||PriceAPI.firstDate;syncChips();}
 
 $('mode').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;mode=b.dataset.v;
   [...$('mode').children].forEach(x=>x.classList.toggle('on',x===b));
@@ -523,7 +569,7 @@ $('f').addEventListener('submit',async e=>{
   if(!d0)return fail('언제 샀는지 날짜를 골라 주세요.');
   if(d1<=d0)return fail('기준일은 산 날보다 뒤여야 해요.');
   const [c0,c1]=await Promise.all([PriceAPI.close(pick.symbol,d0),PriceAPI.close(pick.symbol,d1)]);
-  if(!c0||!c1)return fail('그 날짜의 시세가 없어요. 다른 날짜를 골라 주세요.');
+  if(!c0||!c1){const f=PriceAPI.firstOf(pick.symbol);return fail(f&&d0<f?`${pick.name}${josa(pick.name,'은','는').slice(pick.name.length)} ${ymd(f)}부터 시세가 있어요. 그 뒤 날짜로 골라 주세요.`:'그 날짜의 시세가 없어요. 다른 날짜를 골라 주세요.');}
   const us=pick.market==='US';
   const [x0,x1]=us?await Promise.all([PriceAPI.fx(c0.date),PriceAPI.fx(c1.date)]):[null,null];
   if(us&&(!x0||!x1))return fail('그 날짜의 환율이 아직 없어요. 하루 전 날짜로 다시 골라 주세요.');
@@ -534,7 +580,8 @@ $('f').addEventListener('submit',async e=>{
   const series=await PriceAPI.series(pick.symbol,c0.date,c1.date);
   const ext={KRW:await PriceAPI.extremes(pick.symbol,c0.date,c1.date,us)};if(us)ext.USD=await PriceAPI.extremes(pick.symbol,c0.date,c1.date,false);
   // 같은 돈, 다른 종목
-  const others=await Promise.all(SYMBOLS.map(async x=>{const o=await valueOf(x.s,x.m,r.cost,c0.date,c1.date);return o&&{s:x.s,n:x.n,m:x.m,value:o.value,ret:o.ret};}));
+  const pool=PriceAPI.anyLive()?SYMBOLS.filter(x=>PriceAPI.live(x.s)):SYMBOLS;
+  const others=await Promise.all(pool.map(async x=>{const o=await valueOf(x.s,x.m,r.cost,c0.date,c1.date);return o&&{s:x.s,n:x.n,m:x.m,value:o.value,ret:o.ret};}));
   const ranking=others.filter(Boolean).sort((a,b)=>b.value-a.value);
   last={...r,pick,c0,c1,x0,x1,years,series,shareMode:mode,ranking,ext};
   cur='KRW';showAll=false;[...$('cur').children].forEach(x=>x.classList.toggle('on',x.dataset.v==='KRW'));
@@ -579,6 +626,7 @@ function render(){
   drawChart(l.series,l.shares,us&&!inUSD,cost,(inUSD?l.ext.USD:l.ext.KRW).high,inUSD?0:l.cash);
   if(us)paintBep();
   $('fxWarn').classList.toggle('hidden',!(us&&!FxAPI.live));
+  $('pxWarn').classList.toggle('hidden',PriceAPI.live(l.pick.symbol));
   paintPeak();
   renderRank();
 }
@@ -633,7 +681,14 @@ function shareImage(){
   return new Promise(res=>c.toBlob(res,'image/png'));
 }
 $('share').addEventListener('click',async()=>{
-  if(!last)return;track('share_click');const blob=await shareImage();const file=new File([blob],'daymarket.png',{type:'image/png'});
+  if(!last)return;track('share_click');const blob=await shareImage();
+  const C=window.Capacitor;
+  if(C&&C.isNativePlatform&&C.isNativePlatform()&&C.Plugins&&C.Plugins.Share&&C.Plugins.Filesystem){
+    try{const b64=await new Promise((ok,no)=>{const fr=new FileReader();fr.onload=()=>ok(String(fr.result).split(',')[1]);fr.onerror=no;fr.readAsDataURL(blob);});
+      const w=await C.Plugins.Filesystem.writeFile({path:'daymarket.png',data:b64,directory:'CACHE'});
+      await C.Plugins.Share.share({title:'daymarket',text:'그때 샀다면, 지금 얼마일까?',files:[w.uri]});}catch(e){console.debug('[share]',e);}
+    return;}
+  const file=new File([blob],'daymarket.png',{type:'image/png'});
   try{if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],text:'그때 샀다면, 지금 얼마일까?'});return;}}catch(_){return;}
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='daymarket.png';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);toast('결과 이미지를 저장했어요');
 });

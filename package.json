@@ -1,0 +1,19 @@
+{
+  "name": "daymarket",
+  "private": true,
+  "version": "0.1.0",
+  "description": "그때 샀다면 지금 얼마일까? 안드로이드 앱 래퍼(Capacitor)",
+  "scripts": {
+    "build": "node scripts/build-web.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/filesystem": "^8.0.0",
+    "@capacitor/share": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.0.0"
+  }
+}

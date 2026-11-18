@@ -1,0 +1,8 @@
+{
+  "appId": "io.github.loopyjobeep.daymarket",
+  "appName": "데이마켓",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#f2f4f6"
+  }
+}
