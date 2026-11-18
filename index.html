@@ -438,8 +438,8 @@ const PriceAPI=(()=>{
     firstOf:sym=>idx&&idx[sym]?idx[sym].first:null,
     get name(){if(!idx||!Object.keys(idx).length)return MockProvider.name;const v=Object.values(idx);
       const kr=v.find(x=>x.market==='KR'),us=v.find(x=>x.market==='US');
-      /* KRX OPEN API 약관: 결과 화면에 KRX 데이터를 이용했다는 사실을 표시해야 한다 */
-      return [kr&&(/KRX/.test(kr.source)?'국내 한국거래소(KRX) 데이터 이용':'국내 금융위원회 주식시세정보'),us&&'미국 Marketstack'].filter(Boolean).join(' · ')+' (종가)';},
+      /* KRX OPEN API 약관 제10조③: 화면에 "한국거래소 통계정보"를 사용한 결과임을 명시해야 한다 */
+      return [kr&&(/KRX/.test(kr.source)?'국내 한국거래소 통계정보 이용':'국내 금융위원회 주식시세정보'),us&&'미국 Marketstack'].filter(Boolean).join(' · ')+' (종가)';},
     firstDate:START,
     search:q=>MockProvider.search(q),
     fx:d=>MockProvider.fx(d),
