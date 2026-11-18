@@ -1,8 +1,10 @@
 // 지원 종목의 일별 종가를 받아 data/prices/<종목>.json 과 data/prices/index.json 에 저장한다.
 // 실행: DATA_GO_KR_KEY=... MARKETSTACK_KEY=... node scripts/fetch-prices.mjs
 //
-// 국내: 금융위원회_주식시세정보(공공데이터포털). 키는 포털의 "일반 인증키(Decoding)"를 쓴다.
-// 미국: Marketstack v2 /eod. 무료 플랜은 최근 1년, 유료(Basic 이상)는 더 긴 기간을 준다.
+// 국내: 한국거래소(KRX) OPEN API 유가증권·코스닥 일별매매정보(2010년~전일). 키: KRX_AUTH_KEY
+//       날짜 하나에 시장 전체가 오므로 날짜마다 코스피·코스닥 2번 호출한다(키당 하루 10,000건 한도).
+//       KRX 키가 없고 DATA_GO_KR_KEY만 있으면 금융위원회_주식시세정보(2020년~)를 쓴다.
+// 미국: Marketstack v2 /eod. Basic은 10년, 무료는 1년. 요청 기간을 US_YEARS(기본 10)년에서 시작해 거절되면 5년, 1년으로 줄인다.
 //
 // 저장 형식: {"symbol","market","source","updated","d":[날짜...],"c":[원래 종가...],"splits":[[날짜,배수]...]}
 // 액면분할은 가격을 고치지 않고 splits에만 적는다. 화면이 읽을 때 분할 전 가격을 배수로 나눠 맞춘다.
@@ -20,11 +22,15 @@ const SYMBOLS = [
 
 const DIR = 'data/prices';
 const KR_KEY = process.env.DATA_GO_KR_KEY;
+const KRX_KEY = process.env.KRX_AUTH_KEY;
+let KRX_BASE = process.env.KRX_BASE || 'https://data-dbg.krx.co.kr/svc/apis/sto';
+const KRX_START = process.env.KRX_START || '2010-01-04';
+const KRX_MAX_CALLS = +(process.env.KRX_MAX_CALLS || 9000);
+const US_YEARS = +(process.env.US_YEARS || 10);
 const US_KEY = process.env.MARKETSTACK_KEY;
 const KR_BASE = process.env.KR_BASE || 'https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService';
 const US_BASE = process.env.US_BASE || 'https://api.marketstack.com/v2';
 const KR_START = process.env.KR_START || '2020-01-01';
-const US_START = process.env.US_START || '2016-01-01';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const todayKST = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
@@ -66,6 +72,7 @@ function merge(prev, rows) {
 // 국내: 하루 등락 제한(±30%)을 넘는 변화는 정상 거래로 나올 수 없으므로 액면분할·병합·무상증자로 본다.
 // 흔한 배수에 가까울 때만 기록하고, 판단한 내용은 로그로 남긴다.
 const RATIOS = [1.5, 2, 2.5, 3, 4, 5, 10, 20, 25, 50, 100];
+const logged = new Set(); const logOnce = (k, f) => { if (!logged.has(k)) { logged.add(k); f(); } };
 function detectSplitsKR(sym, d, c) {
   const out = [];
   for (let i = 1; i < d.length; i++) {
@@ -77,9 +84,9 @@ function detectSplitsKR(sym, d, c) {
     if (Math.abs(best - x) / best <= 0.12) {
       const ratio = up ? best : 1 / best;
       out.push([d[i], ratio]);
-      console.log(`  ${sym} ${d[i]} 가격 ${c[i - 1]} → ${c[i]}: 배수 ${ratio}로 보정`);
+      logOnce(sym + d[i], () => console.log(`  ${sym} ${d[i]} 가격 ${c[i - 1]} → ${c[i]}: 배수 ${ratio}로 보정`));
     } else {
-      console.warn(`  ${sym} ${d[i]} 큰 가격 변화(${c[i - 1]} → ${c[i]})가 있지만 흔한 배수가 아니라 보정하지 않음. 확인 필요`);
+      logOnce(sym + d[i], () => console.warn(`  ${sym} ${d[i]} 큰 가격 변화(${c[i - 1]} → ${c[i]})가 있지만 흔한 배수가 아니라 보정하지 않음. 확인 필요`));
     }
   }
   return out;
@@ -108,6 +115,28 @@ async function fetchKR(sym, from, to) {
     await sleep(300);
   }
   return rows;
+}
+
+// KRX: 하루치 시장 전체에서 필요한 종목만 고른다. ISU_CD가 표준코드(KR7005930003)로 오는 경우도 처리
+const krxCode = it => {
+  const a = String(it.ISU_SRT_CD || ''), b = String(it.ISU_CD || '');
+  if (/^\d{6}$/.test(a)) return a;
+  if (/^\d{6}$/.test(b)) return b;
+  if (/^KR7\d{6}/.test(b)) return b.slice(3, 9);
+  return a || b;
+};
+async function krxDay(path, date) {
+  const url = `${KRX_BASE}/${path}?basDd=${date.replace(/-/g, '')}`;
+  try {
+    const r = await fetch(url, { headers: { AUTH_KEY: KRX_KEY }, signal: AbortSignal.timeout(60000) });
+    const t = await r.text();
+    if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status} ${t.slice(0, 200)}`), { status: r.status });
+    return JSON.parse(t).OutBlock_1 || [];
+  } catch (e) {
+    // https가 안 되면 http로 한 번 바꿔 본다(KRX 문서 예시가 http)
+    if (!e.status && KRX_BASE.startsWith('https://')) { KRX_BASE = KRX_BASE.replace('https://', 'http://'); console.warn('  KRX https 실패, http로 전환:', e.message); return krxDay(path, date); }
+    throw e;
+  }
 }
 
 async function fetchUS(symbols, from, to) {
@@ -143,61 +172,101 @@ await mkdir(DIR, { recursive: true });
 const today = todayKST();
 let index = { symbols: {} };
 try { index = JSON.parse(await readFile(`${DIR}/index.json`, 'utf8')); } catch { /* 첫 실행 */ }
-const results = { ok: [], fail: [], skip: [] };
+const results = { ok: [], fail: [], skip: [] }; const okMap = {};
 
 async function save(sym, name, market, source, merged, splits) {
   if (!merged.d.length) { results.fail.push(`${sym}(데이터 0건)`); return; }
   await writeFile(`${DIR}/${sym}.json`, JSON.stringify({ symbol: sym, name, market, source, updated: new Date().toISOString(), d: merged.d, c: merged.c, splits }));
   index.symbols[sym] = { name, market, source, first: merged.d[0], last: merged.d[merged.d.length - 1], n: merged.d.length };
-  results.ok.push(`${sym} ${merged.d[0]}~${merged.d[merged.d.length - 1]} (${merged.d.length}일)`);
+  okMap[sym] = `${sym} ${merged.d[0]}~${merged.d[merged.d.length - 1]} (${merged.d.length}일)`; results.ok = Object.values(okMap);
 }
 
 // 국내
 const kr = SYMBOLS.filter(x => x[2] === 'KR');
-if (!KR_KEY) { console.warn('DATA_GO_KR_KEY 없음: 국내 종목 건너뜀'); results.skip.push(...kr.map(x => x[0])); }
-else for (const [sym, name] of kr) {
-  try {
-    const prev = await load(sym);
-    // 마지막 날 이후만 받되, 분할 판단을 위해 마지막 날 하루를 겹쳐 받는다
-    const from = prev?.d?.length && process.env.KR_BACKFILL !== '1' ? prev.d[prev.d.length - 1] : KR_START;
-    console.log(`KR ${sym} ${name}: ${from} ~ ${today}`);
-    const rows = await fetchKR(sym, from, today);
-    const merged = merge(prev, rows);
-    const splits = detectSplitsKR(sym, merged.d, merged.c);
-    await save(sym, name, 'KR', '금융위원회 주식시세정보(공공데이터포털)', merged, splits);
-  } catch (e) { console.error(`  실패: ${e.message}`); results.fail.push(sym); }
-  await sleep(300);
-}
+const yesterday = addDays(today, -1);
+if (KRX_KEY) {
+  const stateFile = `${DIR}/_krx_state.json`;
+  let state = {}; try { state = JSON.parse(await readFile(stateFile, 'utf8')); } catch { /* 처음 */ }
+  if (process.env.KR_BACKFILL === '1') state = {};
+  const prevs = {}; const rows = {};
+  for (const [s] of kr) {
+    const p = await load(s);
+    // 다른 출처(금융위)로 받은 파일이거나 처음부터 다시 받을 때는 기존 값을 쓰지 않는다
+    prevs[s] = state.last && p && /KRX/.test(p.source || '') ? p : null;
+    rows[s] = [];
+  }
+  let d = state.last ? addDays(state.last, 1) : KRX_START;
+  let calls = 0, days = 0, lastDone = state.last || null, failed = false;
+  const flush = async () => {
+    for (const [s, name] of kr) {
+      const merged = merge(prevs[s], rows[s]);
+      if (!merged.d.length) continue;
+      const splits = detectSplitsKR(s, merged.d, merged.c);
+      await save(s, name, 'KR', '한국거래소(KRX) OPEN API', merged, splits);
+      prevs[s] = { d: merged.d, c: merged.c, source: 'KRX' }; rows[s] = [];
+    }
+    if (lastDone) await writeFile(stateFile, JSON.stringify({ last: lastDone, updated: new Date().toISOString() }));
+  };
+  console.log(`KR(KRX) ${d} ~ ${yesterday}, 이번 실행 최대 ${KRX_MAX_CALLS}회 호출`);
+  for (; d <= yesterday; d = addDays(d, 1)) {
+    const w = new Date(d + 'T00:00:00Z').getUTCDay();
+    if (w === 0 || w === 6) { lastDone = d; continue; }
+    if (calls + 2 > KRX_MAX_CALLS) { console.log(`  호출 한도에 도달해 ${lastDone}까지 저장하고 멈춤. 다음 실행에서 이어받음`); break; }
+    try {
+      const [a, b] = await Promise.all([krxDay('stk_bydd_trd', d), krxDay('ksq_bydd_trd', d)]);
+      calls += 2;
+      for (const it of [...a, ...b]) {
+        const code = krxCode(it);
+        if (rows[code]) rows[code].push([d, parseFloat(String(it.TDD_CLSPRC).replace(/,/g, ''))]);
+      }
+      lastDone = d; days++;
+      if (days % 250 === 0) { await flush(); console.log(`  ${d}까지 저장 (${calls}회 호출)`); }
+    } catch (e) { console.error(`  ${d} 실패: ${e.message}`); failed = true; break; }
+    await sleep(+(process.env.KRX_SLEEP ?? 80));
+  }
+  await flush();
+  console.log(`  KRX 끝: ${calls}회 호출, 마지막 처리일 ${lastDone}${failed ? ' (중간 실패, 다음 실행에서 이어받음)' : ''}`);
+  if (failed && !results.ok.length) results.fail.push('KRX');
+} else if (KR_KEY) {
+  for (const [sym, name] of kr) {
+    try {
+      const prev = await load(sym);
+      const from = prev?.d?.length && process.env.KR_BACKFILL !== '1' ? prev.d[prev.d.length - 1] : KR_START;
+      console.log(`KR(금융위) ${sym} ${name}: ${from} ~ ${today}`);
+      const rows = await fetchKR(sym, from, today);
+      const merged = merge(prev, rows);
+      const splits = detectSplitsKR(sym, merged.d, merged.c);
+      await save(sym, name, 'KR', '금융위원회 주식시세정보(공공데이터포털)', merged, splits);
+    } catch (e) { console.error(`  실패: ${e.message}`); results.fail.push(sym); }
+    await sleep(300);
+  }
+} else { console.warn('KRX_AUTH_KEY, DATA_GO_KR_KEY 모두 없음: 국내 종목 건너뜀'); results.skip.push(...kr.map(x => x[0])); }
 
 // 미국: 새 종목(백필)과 기존 종목(이어받기)을 나눠 한꺼번에 요청한다
 const us = SYMBOLS.filter(x => x[2] === 'US');
 if (!US_KEY) { console.warn('MARKETSTACK_KEY 없음: 미국 종목 건너뜀'); results.skip.push(...us.map(x => x[0])); }
 else {
   const prevs = Object.fromEntries(await Promise.all(us.map(async ([s]) => [s, await load(s)])));
-  // US_BACKFILL=1 이면 기존 파일이 있어도 US_START부터 다시 받는다(유료 플랜으로 바꾼 뒤 과거분 채우기)
+  // US_BACKFILL=1 이면 기존 파일이 있어도 처음부터(10년) 다시 받는다(유료 플랜으로 바꾼 뒤 과거분 채우기)
   if (process.env.US_BACKFILL === '1') for (const s in prevs) prevs[s] = null;
   const fresh = us.filter(([s]) => !prevs[s]?.d?.length).map(x => x[0]);
   const cont = us.filter(([s]) => prevs[s]?.d?.length).map(x => x[0]);
   const groups = [];
-  if (fresh.length) groups.push([fresh, US_START]);
+  const startFor = y => addDays(addDays(today, -Math.round(y * 365.25)), 7);
+  if (fresh.length) groups.push([fresh, null]);
   if (cont.length) {
     const from = cont.map(s => prevs[s].d[prevs[s].d.length - 1]).sort()[0];
     groups.push([cont, from]);
   }
-  for (const [syms, from0] of groups) {
-    let from = from0;
-    let got;
-    try {
-      console.log(`US ${syms.join(',')}: ${from} ~ ${today}`);
-      got = await fetchUS(syms, from, today);
-    } catch (e) {
-      // 무료 플랜은 오래된 기간을 거절할 수 있어 최근 1년으로 한 번 더 시도한다
-      console.warn(`  ${e.message}`);
-      from = addDays(today, -365);
-      if (from <= from0) { results.fail.push(...syms); continue; }
-      console.log(`  최근 1년(${from}~)으로 다시 시도`);
-      try { got = await fetchUS(syms, from, today); } catch (e2) { console.error(`  실패: ${e2.message}`); results.fail.push(...syms); continue; }
+  for (const [syms, fixedFrom] of groups) {
+    // 새 종목은 US_YEARS년 → 5년 → 1년 순서로 시도한다(요금제가 허용하는 가장 긴 기간)
+    const tries = fixedFrom ? [fixedFrom] : [...new Set([US_YEARS, 5, 1])].filter(y => y <= US_YEARS).map(startFor);
+    let got = null;
+    for (const from of tries) {
+      try { console.log(`US ${syms.join(',')}: ${from} ~ ${today}`); got = await fetchUS(syms, from, today); break; }
+      catch (e) { console.warn(`  거절됨: ${e.message}`); }
     }
+    if (!got) { results.fail.push(...syms); continue; }
     for (const s of syms) {
       const name = us.find(x => x[0] === s)[1];
       const merged = merge(prevs[s], got.rows[s]);

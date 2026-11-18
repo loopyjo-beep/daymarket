@@ -1,6 +1,8 @@
 # 평일 한국 시간 14:10에 지원 종목의 일별 종가를 받아 data/prices/ 를 갱신한다.
 # (국내 공공데이터는 거래 다음 영업일 13시 이후, 미국은 한국 시간 아침에 전날 종가가 나온다)
-# 필요한 비밀값: DATA_GO_KR_KEY(공공데이터포털 일반 인증키 Decoding), MARKETSTACK_KEY
+# 필요한 비밀값: KRX_AUTH_KEY(한국거래소 OPEN API 인증키), MARKETSTACK_KEY(Basic 이상이면 10년)
+# 선택: DATA_GO_KR_KEY(KRX 키가 없을 때만 금융위원회 주식시세정보로 국내 2020년~)
+# 국내 첫 실행은 2010년부터 약 8,800번 호출(키당 하루 10,000건 한도 안). 끊기면 다음 실행에서 이어받는다.
 # 수동 실행 시 backfill을 고르면 과거 기간을 처음부터 다시 받는다.
 name: update-prices
 on:
@@ -20,6 +22,7 @@ concurrency:
 jobs:
   prices:
     runs-on: ubuntu-latest
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -27,6 +30,7 @@ jobs:
           node-version: '22'
       - name: Fetch prices
         env:
+          KRX_AUTH_KEY: ${{ secrets.KRX_AUTH_KEY }}
           DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
           MARKETSTACK_KEY: ${{ secrets.MARKETSTACK_KEY }}
           US_BACKFILL: ${{ (github.event.inputs.backfill == 'us' || github.event.inputs.backfill == 'all') && '1' || '0' }}

@@ -17,25 +17,25 @@
 ## 데이터 출처
 | 항목 | 출처 | 비용 | 범위 |
 |---|---|---|---|
-| 국내 주가 | 금융위원회 주식시세정보(공공데이터포털) | 무료 | 2020-01-02 이후로 받도록 설정 |
-| 미국 주가 | Marketstack | 무료 플랜 월 100회, 최근 1년 / 유료 플랜은 더 긴 기간 | 무료 키면 최근 1년만 |
+| 국내 주가 | 한국거래소(KRX) OPEN API 유가증권·코스닥 일별매매정보 | 무료(키당 하루 10,000건) | 2010년 1월 ~ 전일 |
+| 미국 주가 | Marketstack Basic | 월 9.99달러 | 최근 10년 ~ 전 거래일 |
 | 환율 | 한국은행 ECOS 매매기준율, 없으면 ECB(Frankfurter) | 무료 | 2010년 이후 |
 
 - 모든 주가는 종가 기준이고, 배당은 넣지 않았습니다.
 - 액면분할 보정: 미국은 Marketstack이 주는 분할 정보를 씁니다. 국내는 하루 가격제한폭(±30%)을 넘는 변화를 분할·병합으로 판단해 보정합니다. 보정한 날짜는 Actions 로그에 남습니다.
 - 시세 파일이 없는 종목은 가상 주가로 계산하고, 결과 화면에 "실제 주가가 아니에요"라고 표시합니다.
+- KRX OPEN API 약관: 비상업 목적으로만 쓸 수 있고 제3자 제공이 금지되며, 화면에 KRX 데이터 이용 사실을 표시해야 합니다(화면 하단 출처에 표시). 광고·구독 등 수익화 전에는 KRX·코스콤 정보이용계약을 따로 확인해야 합니다.
 
 ## 저장소에 등록할 비밀값
 Settings > Secrets and variables > Actions > New repository secret
 
 | 이름 | 어디서 받나 | 없으면 |
 |---|---|---|
-| `DATA_GO_KR_KEY` | data.go.kr에서 "금융위원회_주식시세정보" 활용신청 후 마이페이지의 일반 인증키(Decoding) | 국내 종목이 가상 주가로 남음 |
-| `MARKETSTACK_KEY` | marketstack.com 가입 후 대시보드의 API Access Key | 미국 종목이 가상 주가로 남음 |
+| `KRX_AUTH_KEY` | openapi.krx.co.kr 회원가입 → 인증키 신청 → 승인 후 "유가증권 일별매매정보", "코스닥 일별매매정보" API 이용 신청 | 국내 종목이 가상 주가로 남음 |
+| `MARKETSTACK_KEY` | marketstack.com에서 Basic 플랜 결제 → 대시보드의 API Access Key | 미국 종목이 가상 주가로 남음 |
 | `ECOS_KEY` | ecos.bok.or.kr/api 인증키 신청 | 환율은 ECB 기준으로 표시 |
 
-키를 등록한 뒤 Actions 탭에서 update-prices, update-fx를 한 번씩 수동 실행하면 바로 데이터가 생깁니다.
-Marketstack을 유료로 바꾼 뒤에는 update-prices를 수동 실행하면서 backfill에 `us`를 넣으면 과거분을 다시 받습니다.
+키를 등록한 뒤 Actions 탭에서 update-prices, update-fx를 한 번씩 수동 실행하면 데이터가 생깁니다. 국내 첫 실행은 2010년부터 받느라 1시간 안팎 걸릴 수 있습니다.
 
 ## 안드로이드 앱
 - 코드를 올릴 때마다 Actions의 android가 자동으로 돌고, Releases의 "안드로이드 테스트 빌드"에 `daymarket-debug.apk`가 올라갑니다.

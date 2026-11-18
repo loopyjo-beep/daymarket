@@ -436,8 +436,10 @@ const PriceAPI=(()=>{
     ensure,live,
     anyLive:()=>!!(idx&&Object.keys(idx).length),
     firstOf:sym=>idx&&idx[sym]?idx[sym].first:null,
-    get name(){if(!idx||!Object.keys(idx).length)return MockProvider.name;const ms=new Set(Object.values(idx).map(x=>x.market));
-      return [ms.has('KR')&&'국내 금융위원회 주식시세정보',ms.has('US')&&'미국 Marketstack'].filter(Boolean).join(' · ')+' (종가)';},
+    get name(){if(!idx||!Object.keys(idx).length)return MockProvider.name;const v=Object.values(idx);
+      const kr=v.find(x=>x.market==='KR'),us=v.find(x=>x.market==='US');
+      /* KRX OPEN API 약관: 결과 화면에 KRX 데이터를 이용했다는 사실을 표시해야 한다 */
+      return [kr&&(/KRX/.test(kr.source)?'국내 한국거래소(KRX) 데이터 이용':'국내 금융위원회 주식시세정보'),us&&'미국 Marketstack'].filter(Boolean).join(' · ')+' (종가)';},
     firstDate:START,
     search:q=>MockProvider.search(q),
     fx:d=>MockProvider.fx(d),
@@ -568,7 +570,9 @@ $('f').addEventListener('submit',async e=>{
   if(!(v>0))return fail(mode==='amt'?'금액을 입력해 주세요.':'수량을 입력해 주세요.');
   if(!d0)return fail('언제 샀는지 날짜를 골라 주세요.');
   if(d1<=d0)return fail('기준일은 산 날보다 뒤여야 해요.');
-  const [c0,c1]=await Promise.all([PriceAPI.close(pick.symbol,d0),PriceAPI.close(pick.symbol,d1)]);
+  let [c0,c1]=await Promise.all([PriceAPI.close(pick.symbol,d0),PriceAPI.close(pick.symbol,d1)]);
+  { const f0=PriceAPI.firstOf(pick.symbol);
+    if(!c0&&f0&&d0<f0&&(new Date(f0)-new Date(d0))/86400000<=31){c0=await PriceAPI.close(pick.symbol,f0);if(c0)toast(`데이터가 있는 첫날(${ymd(f0)})로 계산했어요`);} }
   if(!c0||!c1){const f=PriceAPI.firstOf(pick.symbol);return fail(f&&d0<f?`${pick.name}${josa(pick.name,'은','는').slice(pick.name.length)} ${ymd(f)}부터 시세가 있어요. 그 뒤 날짜로 골라 주세요.`:'그 날짜의 시세가 없어요. 다른 날짜를 골라 주세요.');}
   const us=pick.market==='US';
   const [x0,x1]=us?await Promise.all([PriceAPI.fx(c0.date),PriceAPI.fx(c1.date)]):[null,null];
