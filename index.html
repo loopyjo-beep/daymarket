@@ -456,8 +456,13 @@ const PriceAPI=(()=>{
       const pt=i=>({date:f.d[i],close:rp(f.c[i],f.market),fx:rf(fxOf(f.d[i]))});return{high:pt(hi),low:pt(lo)};}
   };
 })();
-function paintBadge(){const b=document.querySelector('.demo');if(!b)return;const p=PriceAPI.anyLive(),x=FxAPI.live;
-  b.textContent=p&&x?'베타 · 실제 시세(종가)':p?'베타 · 실제 주가 · 가상 환율':x?'데모 · 가상 주가 · 실제 환율':'데모 · 가상 시세';
+function paintBadge(){const b=document.querySelector('.demo');if(!b)return;const x=FxAPI.live;
+  const kr=SYMBOLS.filter(s=>s.m==='KR'),us=SYMBOLS.filter(s=>s.m==='US');
+  const krL=kr.every(s=>PriceAPI.live(s.s)),usL=us.every(s=>PriceAPI.live(s.s)),anyL=PriceAPI.anyLive();
+  /* 일부 시장만 실제일 때 전체가 실제인 것처럼 보이지 않게 시장별로 표시 */
+  b.textContent=krL&&usL?(x?'베타 · 실제 시세(종가)':'베타 · 실제 주가 · 가상 환율')
+    :krL?'베타 · 국내 실제 주가 · 미국 가상':usL?'베타 · 미국 실제 주가 · 국내 가상'
+    :anyL?'베타 · 일부 종목만 실제 주가':x?'데모 · 가상 주가 · 실제 환율':'데모 · 가상 시세';
   const n=$('srcNote');if(n)n.textContent=`주가: ${PriceAPI.name} · 환율: ${FxAPI.name}`;}
 Promise.all([PriceAPI.ensure(),FxAPI.ensure()]).then(paintBadge);
 
