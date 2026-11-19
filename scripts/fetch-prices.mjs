@@ -1,10 +1,12 @@
 // 지원 종목의 일별 종가를 받아 data/prices/<종목>.json 과 data/prices/index.json 에 저장한다.
-// 실행: DATA_GO_KR_KEY=... MARKETSTACK_KEY=... node scripts/fetch-prices.mjs
+// 실행: KRX_AUTH_KEY=... TIINGO_KEY=... node scripts/fetch-prices.mjs
 //
 // 국내: 한국거래소(KRX) OPEN API 유가증권·코스닥 일별매매정보(2010년~전일). 키: KRX_AUTH_KEY
 //       날짜 하나에 시장 전체가 오므로 날짜마다 코스피·코스닥 2번 호출한다(키당 하루 10,000건 한도).
 //       KRX 키가 없고 DATA_GO_KR_KEY만 있으면 금융위원회_주식시세정보(2020년~)를 쓴다.
-// 미국: Marketstack v2 /eod. Basic은 10년, 무료는 1년. 요청 기간을 US_YEARS(기본 10)년에서 시작해 거절되면 5년, 1년으로 줄인다.
+// 미국: TIINGO_KEY가 있으면 Tiingo 일별 종가(무료 플랜도 상장 이후 전체, 30년 이상). 종목마다 1번 호출.
+//       Tiingo 무료·개인 플랜은 '내부 사용만' 허용한다. 공개 출시 전 표시 라이선스 계약 또는 출처 교체 필요.
+//       TIINGO_KEY가 없고 MARKETSTACK_KEY만 있으면 Marketstack v2 /eod(무료 1년, Basic 10년)를 쓴다.
 //
 // 저장 형식: {"symbol","market","source","updated","d":[날짜...],"c":[원래 종가...],"splits":[[날짜,배수]...]}
 // 액면분할은 가격을 고치지 않고 splits에만 적는다. 화면이 읽을 때 분할 전 가격을 배수로 나눠 맞춘다.
@@ -28,6 +30,9 @@ const KRX_START = process.env.KRX_START || '2010-01-04';
 const KRX_MAX_CALLS = +(process.env.KRX_MAX_CALLS || 9000);
 const US_YEARS = +(process.env.US_YEARS || 10);
 const US_KEY = process.env.MARKETSTACK_KEY;
+const TIINGO_KEY = process.env.TIINGO_KEY;
+const TIINGO_BASE = process.env.TIINGO_BASE || 'https://api.tiingo.com';
+const US_START = process.env.US_START || '2000-01-01'; // 환율 데이터 시작(2000)에 맞춤. Tiingo는 이 날짜와 상장일 중 늦은 날부터 준다
 const KR_BASE = process.env.KR_BASE || 'https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService';
 const US_BASE = process.env.US_BASE || 'https://api.marketstack.com/v2';
 const KR_START = process.env.KR_START || '2020-01-01';
@@ -37,11 +42,11 @@ const todayKST = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 
 const addDays = (d, n) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 const mask = s => s.replace(/(serviceKey|access_key)=[^&]+/g, '$1=***');
 
-async function getJSON(url, label) {
+async function getJSON(url, label, headers = {}) {
   let lastErr;
   for (let i = 0; i < 3; i++) {
     try {
-      const r = await fetch(url, { signal: AbortSignal.timeout(60000) });
+      const r = await fetch(url, { headers, signal: AbortSignal.timeout(60000) });
       const text = await r.text();
       let j; try { j = JSON.parse(text); } catch { throw new Error(`JSON 아님 (HTTP ${r.status}): ${text.slice(0, 200)}`); }
       if (!r.ok) { const e = new Error(`HTTP ${r.status}: ${JSON.stringify(j).slice(0, 300)}`); e.status = r.status; e.body = j; throw e; }
@@ -137,6 +142,22 @@ async function krxDay(path, date) {
     if (!e.status && KRX_BASE.startsWith('https://')) { KRX_BASE = KRX_BASE.replace('https://', 'http://'); console.warn('  KRX https 실패, http로 전환:', e.message); return krxDay(path, date); }
     throw e;
   }
+}
+
+// Tiingo: [{date:"2020-08-31T00:00:00.000Z", close(원래 종가), splitFactor(그날 분할 배수, 평소 1)...}]
+// 키는 주소가 아니라 Authorization 헤더로 보낸다(로그에 남지 않게).
+async function fetchTiingo(sym, from, to) {
+  const q = new URLSearchParams({ startDate: from, endDate: to, format: 'json', resampleFreq: 'daily' });
+  const j = await getJSON(`${TIINGO_BASE}/tiingo/daily/${encodeURIComponent(sym.toLowerCase())}/prices?${q}`, `Tiingo ${sym}`,
+    { Authorization: `Token ${TIINGO_KEY}`, 'Content-Type': 'application/json' });
+  if (!Array.isArray(j)) throw new Error(`Tiingo ${sym} 응답 형식 이상: ${JSON.stringify(j).slice(0, 200)}`);
+  const rows = []; const splits = [];
+  for (const x of j) {
+    const d = String(x.date).slice(0, 10);
+    rows.push([d, +x.close]);
+    if (x.splitFactor && +x.splitFactor !== 1) splits.push([d, +x.splitFactor]);
+  }
+  return { rows, splits };
 }
 
 async function fetchUS(symbols, from, to) {
@@ -242,10 +263,25 @@ if (KRX_KEY) {
   }
 } else { console.warn('KRX_AUTH_KEY, DATA_GO_KR_KEY 모두 없음: 국내 종목 건너뜀'); results.skip.push(...kr.map(x => x[0])); }
 
-// 미국: 새 종목(백필)과 기존 종목(이어받기)을 나눠 한꺼번에 요청한다
+// 미국
 const us = SYMBOLS.filter(x => x[2] === 'US');
-if (!US_KEY) { console.warn('MARKETSTACK_KEY 없음: 미국 종목 건너뜀'); results.skip.push(...us.map(x => x[0])); }
+if (TIINGO_KEY) {
+  for (const [sym, name] of us) {
+    try {
+      let prev = await load(sym);
+      // 다른 출처(Marketstack)로 받은 파일이거나 처음부터 다시 받을 때는 전체를 새로 받는다(출처 섞임 방지)
+      if (process.env.US_BACKFILL === '1' || (prev && !/Tiingo/.test(prev.source || ''))) prev = null;
+      const from = prev?.d?.length ? prev.d[prev.d.length - 1] : US_START;
+      console.log(`US(Tiingo) ${sym} ${name}: ${from} ~ ${today}`);
+      const got = await fetchTiingo(sym, from, today);
+      const merged = merge(prev, got.rows);
+      await save(sym, name, 'US', 'Tiingo', merged, mergeSplits(prev?.splits, got.splits));
+    } catch (e) { console.error(`  실패: ${e.message}`); results.fail.push(sym); }
+    await sleep(+(process.env.TIINGO_SLEEP ?? 800)); // 무료: 시간당 50회
+  }
+} else if (!US_KEY) { console.warn('TIINGO_KEY, MARKETSTACK_KEY 모두 없음: 미국 종목 건너뜀'); results.skip.push(...us.map(x => x[0])); }
 else {
+  // Marketstack: 새 종목(백필)과 기존 종목(이어받기)을 나눠 한꺼번에 요청한다
   const prevs = Object.fromEntries(await Promise.all(us.map(async ([s]) => [s, await load(s)])));
   // US_BACKFILL=1 이면 기존 파일이 있어도 처음부터(10년) 다시 받는다(유료 플랜으로 바꾼 뒤 과거분 채우기)
   if (process.env.US_BACKFILL === '1') for (const s in prevs) prevs[s] = null;

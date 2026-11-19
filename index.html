@@ -324,7 +324,7 @@ const SYMBOLS=[
  {s:'META',n:'메타',m:'US'},{s:'QQQ',n:'인베스코 QQQ',m:'US'},{s:'SPY',n:'SPDR S&P500',m:'US'},{s:'SCHD',n:'슈왑 미국배당',m:'US'}
 ];
 
-const START='2010-01-04';
+const START='2000-01-03'; /* 미국(Tiingo)·환율 기준 첫날. 국내(KRX)는 종목 파일의 첫 날짜(2010~)로 다시 제한된다 */
 function hash(str){let h=2166136261;for(const c of str){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}return h>>>0;}
 function rng(seed){return()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
 function gauss(r){let u=0,v=0;while(!u)u=r();while(!v)v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
@@ -347,8 +347,8 @@ const FxAPI=(()=>{
   async function getJSON(url,ms=12000){const c=new AbortController();const t=setTimeout(()=>c.abort(),ms);
     try{const r=await fetch(url,{signal:c.signal});if(!r.ok)throw new Error('HTTP '+r.status);return await r.json();}finally{clearTimeout(t);}}
   async function fromStatic(){const j=await getJSON('data/usdkrw.json',5000);return build(j.source||'자체 환율 파일',j.rates||{});}
-  async function fromFrankfurter(from=START){
-    const j=await getJSON(`https://api.frankfurter.dev/v1/${from}..${nowKST()}?base=USD&symbols=KRW`);
+  async function fromFrankfurter(from=START,to=nowKST()){
+    const j=await getJSON(`https://api.frankfurter.dev/v1/${from}..${to}?base=USD&symbols=KRW`);
     const o={};for(const [d,v] of Object.entries(j.rates||{})){const x=typeof v==='number'?v:v&&v.KRW;if(x)o[d]=x;}
     return build('유럽중앙은행(ECB) 기준환율로 계산한 원/달러 · Frankfurter',o);}
   async function ensure(){
@@ -358,6 +358,9 @@ const FxAPI=(()=>{
       try{a=await fromStatic();if(a.ds.length<100)a=null;}catch(e){console.debug('[fx] static',e&&e.message);}
       const stale=!a||(new Date(nowKST())-new Date(a.ds[a.ds.length-1]))/86400000>3;
       if(stale){try{b=await fromFrankfurter(a?a.ds[a.ds.length-1]:START);if(!b.ds.length||(!a&&b.ds.length<100))b=null;}catch(e){console.debug('[fx] frankfurter',e&&e.message);}}
+      /* 자체 환율 파일이 START보다 늦게 시작하면(예: 2010년부터만 있음) 앞쪽 빈 기간을 ECB 기준으로 채운다 */
+      if(a&&a.ds[0]>START){try{const e=await fromFrankfurter(START,a.ds[0]);const k=e.ds.findIndex(d=>d>=a.ds[0]);const n=k<0?e.ds.length:k;
+        if(n){a={...a,name:`${a.name} (${ymd(a.ds[0])} 이전은 ECB 기준)`,ds:[...e.ds.slice(0,n),...a.ds],v:[...e.v.slice(0,n),...a.v]};}}catch(e){console.debug('[fx] frankfurter early',e&&e.message);}}
       if(a&&b){const last=a.ds[a.ds.length-1];const k=b.ds.findIndex(d=>d>last);
         if(k>=0){st={name:`${a.name} (${ymd(b.ds[k])} 이후는 ECB 기준)`,ds:[...a.ds,...b.ds.slice(k)],v:[...a.v,...b.v.slice(k)],live:true};return st;}}
       const x=a||b;
@@ -411,7 +414,7 @@ const MockProvider=(()=>{
 
 /* ===== 1-2. 실제 주가 계층 =====
    GitHub Actions(scripts/fetch-prices.mjs)가 매일 받아 두는 data/prices/<종목>.json 을 읽는다.
-   국내: 금융위원회 주식시세정보, 미국: Marketstack. 액면분할은 파일의 splits로 분할 전 가격을 나눠 맞춘다.
+   국내: 한국거래소(KRX) 또는 금융위원회 주식시세정보, 미국: Tiingo 또는 Marketstack. 액면분할은 파일의 splits로 분할 전 가격을 나눠 맞춘다.
    파일이 없는 종목은 가상 주가로 계산하고 결과 화면에 경고를 띄운다.
    앱(안드로이드)이나 파일로 열었을 때는 데이터를 웹 주소에서 가져온다. */
 const DATA_BASE=(window.Capacitor||location.protocol==='file:')?'https://loopyjo-beep.github.io/daymarket/':'';
@@ -439,7 +442,7 @@ const PriceAPI=(()=>{
     get name(){if(!idx||!Object.keys(idx).length)return MockProvider.name;const v=Object.values(idx);
       const kr=v.find(x=>x.market==='KR'),us=v.find(x=>x.market==='US');
       /* KRX OPEN API 약관 제10조③: 화면에 "한국거래소 통계정보"를 사용한 결과임을 명시해야 한다 */
-      return [kr&&(/KRX/.test(kr.source)?'국내 한국거래소 통계정보 이용':'국내 금융위원회 주식시세정보'),us&&'미국 Marketstack'].filter(Boolean).join(' · ')+' (종가)';},
+      return [kr&&(/KRX/.test(kr.source)?'국내 한국거래소 통계정보 이용':'국내 금융위원회 주식시세정보'),us&&(/Tiingo/.test(us.source||'')?'미국 Tiingo':'미국 Marketstack')].filter(Boolean).join(' · ')+' (종가)';},
     firstDate:START,
     search:q=>MockProvider.search(q),
     fx:d=>MockProvider.fx(d),

@@ -1,13 +1,13 @@
 // 한국은행 ECOS에서 원/달러 매매기준율(일별)을 받아 data/usdkrw.json에 저장한다.
 // 실행: ECOS_KEY=발급키 node scripts/fetch-usdkrw.mjs
-// - 처음 실행하면 2010-01-01부터 전부 받고, 이후에는 마지막 날짜 이후만 받아 덧붙인다.
+// - 처음 실행하면 2000-01-01부터 전부 받고, 이후에는 마지막 날짜 이후만 받아 덧붙인다.
 // - 받아 온 값이 이상하면(개수 0, 범위 밖 값) 기존 파일을 그대로 두고 실패로 끝낸다. 화면은 이전 파일로 계속 동작한다.
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 
 const KEY = process.env.ECOS_KEY;
 if (!KEY) { console.error('ECOS_KEY 환경변수가 없습니다.'); process.exit(1); }
 const OUT = 'data/usdkrw.json';
-const START = '20100101';
+const START = '20000101';
 const BASE = process.env.ECOS_BASE || 'https://ecos.bok.or.kr/api';
 // 통계표 후보: 731Y001(주요국 통화의 대원화환율, 2022.6 개편 후). 036Y001은 개편 전 코드(예비)
 const TABLES = ['731Y001', '036Y001'];

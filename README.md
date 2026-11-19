@@ -32,7 +32,8 @@ Settings > Secrets and variables > Actions > New repository secret
 | 이름 | 어디서 받나 | 없으면 |
 |---|---|---|
 | `KRX_AUTH_KEY` | openapi.krx.co.kr 회원가입 → 인증키 신청 → 승인 후 "유가증권 일별매매정보", "코스닥 일별매매정보" API 이용 신청 | 국내 종목이 가상 주가로 남음 |
-| `MARKETSTACK_KEY` | marketstack.com에서 Basic 플랜 결제 → 대시보드의 API Access Key | 미국 종목이 가상 주가로 남음 |
+| `TIINGO_KEY` | tiingo.com 무료 가입 → 우측 상단 계정 메뉴 → API → Token 복사. 미국 종목은 이 키를 우선 사용(상장 이후 전체 종가). 무료·개인 플랜은 내부 사용만 허용되므로 공개 출시 전 라이선스 확인 | 아래 Marketstack 키로 대체, 둘 다 없으면 미국 종목이 가상 주가로 남음 |
+| `MARKETSTACK_KEY` | marketstack.com 대시보드의 API Access Key(무료 1년, Basic 10년). `TIINGO_KEY`가 없을 때만 사용 | 미국 종목이 가상 주가로 남음 |
 | `ECOS_KEY` | ecos.bok.or.kr/api 인증키 신청 | 환율은 ECB 기준으로 표시 |
 
 키를 등록한 뒤 Actions 탭에서 update-prices, update-fx를 한 번씩 수동 실행하면 데이터가 생깁니다. 국내 첫 실행은 2010년부터 받느라 1시간 안팎 걸릴 수 있습니다.
