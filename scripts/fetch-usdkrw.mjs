@@ -5,7 +5,8 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 
 const KEY = process.env.ECOS_KEY;
-if (!KEY) { console.error('ECOS_KEY 환경변수가 없습니다.'); process.exit(1); }
+// 키가 없으면 실패로 끝내지 않고 건너뛴다(매일 실패 알림 방지). 화면은 Frankfurter(ECB) 환율로 대신 동작한다.
+if (!KEY) { console.warn('ECOS_KEY 없음: 환율 수집을 건너뜁니다. GitHub Secrets에 ECOS_KEY를 등록하면 다음 실행부터 받습니다.'); process.exit(0); }
 const OUT = 'data/usdkrw.json';
 const START = '20000101';
 const BASE = process.env.ECOS_BASE || 'https://ecos.bok.or.kr/api';

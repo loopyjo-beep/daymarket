@@ -311,8 +311,11 @@ else {
   }
 }
 
-index.updated = new Date().toISOString();
-await writeFile(`${DIR}/index.json`, JSON.stringify(index, null, 1));
+// 받은 종목이 있을 때만 목록 파일을 고친다(키가 없는 날 빈 커밋 방지)
+if (results.ok.length) {
+  index.updated = new Date().toISOString();
+  await writeFile(`${DIR}/index.json`, JSON.stringify(index, null, 1));
+}
 console.log('\n성공:', results.ok.length, results.ok.join(' | '));
 if (results.skip.length) console.log('건너뜀(키 없음):', results.skip.join(','));
 if (results.fail.length) { console.log('실패:', results.fail.join(',')); }
