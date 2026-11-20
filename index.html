@@ -100,7 +100,7 @@ details[open] .sumhint{display:none}
 main{padding-bottom:110px}
 .view{display:none}.view.active{display:block;animation:rise .22s ease both}
 .nav{position:fixed;z-index:20;left:0;right:0;bottom:0;padding:8px 16px calc(8px + env(safe-area-inset-bottom));background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--line);display:flex;justify-content:center}
-.nav-in{width:min(520px,100%);display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.nav-in{width:min(520px,100%);display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
 .nav button{border:0;background:transparent;color:var(--faint);font:inherit;font-size:12px;font-weight:600;padding:6px 0 4px;border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px}
 .nav button svg{width:22px;height:22px}
 .nav button.on{color:var(--accent)}
@@ -173,6 +173,12 @@ select{width:100%;height:52px;padding:0 10px;border:1.5px solid var(--line);bord
 <button class="daily" id="daily" type="button">
   <span class="ic" id="dailyIc">⏳</span>
   <span><small>오늘의 타임머신</small><b id="dailyTitle"></b></span>
+  <span class="go-ar" aria-hidden="true">›</span>
+</button>
+
+<button class="daily" id="fxrEntry" type="button">
+  <span class="ic">💱</span>
+  <span><small>환율 성적표</small><b>내 미국주식, 환율 몫은 얼마일까?</b></span>
   <span class="go-ar" aria-hidden="true">›</span>
 </button>
 
@@ -272,6 +278,62 @@ select{width:100%;height:52px;padding:0 10px;border:1.5px solid var(--line);bord
 </section>
 </section>
 
+<section class="view" id="view-fxr">
+  <p class="eyebrow">환율 성적표</p>
+  <h1 class="page-h">내 미국주식 손익,<br>환율 몫은 얼마일까?</h1>
+  <p class="lead">증권사 앱에 있는 숫자 3개만 넣으면 돼요.<br>입력한 숫자는 이 기기 밖으로 보내지 않아요.</p>
+  <form class="card" id="xf" autocomplete="off" novalidate>
+    <div class="field">
+      <div class="lab">미국주식 사는 데 쓴 돈 <small>원화, 여러 번 샀다면 합계</small></div>
+      <input id="xK" inputmode="numeric" placeholder="예: 10,000,000">
+    </div>
+    <div class="field">
+      <div class="lab"><span>달러로 바꾼 때</span>
+        <div class="seg" id="xMode"><button type="button" class="on" data-v="date">날짜로</button><button type="button" data-v="rate">환율로</button></div></div>
+      <input id="xD" type="date" aria-label="환전한 날짜">
+      <input id="xR" class="hidden" inputmode="decimal" placeholder="예: 1,480 (증권사 앱의 평균 매입 환율)" aria-label="환전한 환율">
+      <div class="meta" id="xHint">그날 매매기준율에 환전 비용 0.5%를 더해 계산해요.</div>
+    </div>
+    <div class="field">
+      <div class="lab">지금 평가금액 <small>증권사 앱의 달러 평가금액</small></div>
+      <input id="xU" inputmode="decimal" placeholder="예: 7,500">
+    </div>
+    <button class="go" type="submit">환율 성적표 보기</button>
+    <div class="err hidden" id="xErr" role="alert"></div>
+  </form>
+
+  <div id="xOut" class="hidden" aria-live="polite">
+    <div class="card">
+      <div class="res-q" id="xQ"></div>
+      <div class="big" id="xV"></div>
+      <div class="delta" id="xPL"></div>
+      <div class="meta" id="xMeta"></div>
+      <div class="fxwarn hidden" id="xWarn" role="alert"><b>실제 환율이 아니에요.</b> 환율 데이터를 불러오지 못해 가상 환율로 계산했어요. 아래 숫자는 실제와 다릅니다.</div>
+      <div class="verdict" id="xVerdict"></div>
+      <div class="split" id="xBar"></div>
+      <div class="kv"><span>주가가 움직여서</span><b id="xStock"></b></div>
+      <div class="kv"><span>환율이 움직여서</span><b id="xFx"></b></div>
+      <div class="kv"><span>환전 비용 <small style="color:var(--faint)">(살 때·팔 때 각 0.5% 가정)</small></span><b id="xFee"></b></div>
+      <div class="kv"><span>환율 변화</span><b id="xRates"></b></div>
+      <div class="kv"><span>달러로만 보면</span><b id="xUsd"></b></div>
+      <div class="bep"><small>본전 환율(매매기준율)</small><b id="xBep"></b><p id="xBepTxt"></p></div>
+      <button class="alertbtn" id="xAlert" type="button">본전 환율 오면 알림 받기</button>
+      <div class="alertmsg hidden" id="xAlertMsg" role="status"></div>
+    </div>
+    <div class="card">
+      <h2>환율만 다르게 했다면</h2>
+      <p class="h2sub">같은 돈, 같은 종목, 같은 달러 수익률일 때</p>
+      <div class="kv"><span>환율 영향이 없었다면<small style="display:block;color:var(--faint);font-size:12px">환헤지 가정 · 환전·헤지 비용 제외</small></span><b id="xAltH"></b></div>
+      <div class="kv" id="xAltSRow"><span>4번 나눠 환전했다면<small style="display:block;color:var(--faint);font-size:12px" id="xAltSSub">산 날 90·60·30일 전과 산 날</small></span><b id="xAltS"></b></div>
+      <p class="past">헤지 비용, 세금, 수수료는 넣지 않았어요. 지난 환율로 계산한 결과이며 앞으로의 수익과는 관계없어요.</p>
+    </div>
+    <div class="actions3">
+      <button class="btn2" id="xEdit" type="button">숫자 고치기</button>
+      <button class="btn2 dark" id="xShare" type="button">결과 공유</button>
+    </div>
+  </div>
+</section>
+
 <section class="view" id="view-duel">
   <p class="eyebrow">종목 대결</p>
   <h1 class="page-h">같은 날, 같은 돈.<br>누가 더 벌었을까?</h1>
@@ -305,6 +367,7 @@ select{width:100%;height:52px;padding:0 10px;border:1.5px solid var(--line);bord
 </main>
 <nav class="nav" aria-label="주요 메뉴"><div class="nav-in">
   <button type="button" class="on" data-v="calc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>타임머신</button>
+  <button type="button" data-v="fxr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg>환율 성적표</button>
   <button type="button" data-v="duel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16M17 4v16M3 8h8M13 16h8"/></svg>대결</button>
   <button type="button" data-v="saved"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-6-4-6 4z"/></svg>보관함</button>
 </div></nav>
@@ -605,7 +668,11 @@ $('f').addEventListener('submit',async e=>{
 
 function countUp(el,to,fmt){
   if(matchMedia('(prefers-reduced-motion: reduce)').matches){el.textContent=fmt(to);return;}
-  const t0=performance.now(),D=600;(function f(t){const k=Math.min(1,(t-t0)/D),e=1-Math.pow(1-k,3);el.textContent=fmt(to*e);if(k<1)requestAnimationFrame(f);})(t0);
+  /* 프레임 시각이 시작 시각보다 이르면 진행률이 음수가 되므로 0~1로 묶는다.
+     탭이 백그라운드라 애니메이션이 멈춰도 마지막 값은 반드시 찍히게 타이머로 한 번 더 맞춘다 */
+  const id=el._cu=(el._cu||0)+1,t0=performance.now(),D=600;
+  (function f(t){if(el._cu!==id)return;const k=Math.max(0,Math.min(1,(t-t0)/D)),e=1-Math.pow(1-k,3);el.textContent=fmt(to*e);if(k<1)requestAnimationFrame(f);})(t0);
+  setTimeout(()=>{if(el._cu===id)el.textContent=fmt(to);},D+80);
 }
 
 function render(){
@@ -728,7 +795,8 @@ function paintPeak(){
 /* ===== v6: 측정 ===== 
    GC_SITE에 GoatCounter 코드(예: 'daymarket')를 넣으면 켜진다. 비어 있으면 콘솔에만 남긴다.
    이벤트: visit, revisit_7d, calc_kr/us, view_peak/fx/rank, rank_more, detail_open, cur_usd/krw,
-           alert_click, share_click, save_click, daily_click, duel_run */
+           alert_click, share_click, save_click, daily_click, duel_run,
+           nav_<화면>, fxr_entry_home, fxr_open, fxr_calc, fxr_mode_rate, fxr_return, fxr_alert_click, fxr_share */
 const GC_SITE='';
 if(GC_SITE){const sc=document.createElement('script');sc.async=true;sc.src='https://gc.zgo.at/count.js';sc.dataset.goatcounter=`https://${GC_SITE}.goatcounter.com/count`;sc.dataset.goatcounterSettings='{"no_onload":true}';document.head.appendChild(sc);}
 const _q=[];
@@ -874,10 +942,99 @@ $('duelGo').addEventListener('click',async()=>{
   $('duelOut').classList.remove('hidden');$('duelOut').scrollIntoView({behavior:'smooth',block:'start'});
 });
 
+/* ===== A안: 환율 성적표 (3칸 입력) =====
+   증권사 앱의 숫자 3개(쓴 원화, 환전한 날짜 또는 환율, 지금 달러 평가금액)로 손익을 주가 몫·환율 몫·환전 비용으로 나눈다.
+   주가 시세는 쓰지 않고 환율 데이터만 쓴다. 입력값은 이 기기 브라우저에만 저장한다(서버로 보내지 않음).
+   계산 규칙은 타임머신(compute)과 같다: 살 때 기준율×(1+EX_SPREAD), 팔 때 기준율×(1-EX_SPREAD).
+   K: 쓴 원화, r0b/r0e: 산 날 기준율/실제 적용 환율, U1: 지금 달러 평가금액, r1b: 지금 기준율 */
+function fxrCompute({K,r0b,r0e,U1,r1b}){
+  const U0=K/r0e,r1e=r1b*(1-EX_SPREAD),V=U1*r1e,pl=V-K;
+  const stock=(U1-U0)*r0b,fx=U1*(r1b-r0b),fee=pl-stock-fx;
+  return{U0,V,pl,ret:pl/K,usdRet:U1/U0-1,stock,fx,fee,bep:K/(U1*(1-EX_SPREAD)),hedged:K*(U1/U0)};
+}
+window.dmFxr=fxrCompute;
+const XKEY='daymarket_fxr_v1';let xMode='date',xLast=null,xReturned=false;
+const readX=()=>{try{return JSON.parse(localStorage.getItem(XKEY)||'null');}catch(_){return null;}};
+const writeX=o=>{try{localStorage.setItem(XKEY,JSON.stringify(o));}catch(_){}};
+function xSetMode(m){xMode=m;[...$('xMode').children].forEach(b=>b.classList.toggle('on',b.dataset.v===m));
+  $('xD').classList.toggle('hidden',m!=='date');$('xR').classList.toggle('hidden',m!=='rate');
+  $('xHint').textContent=m==='date'?'그날 매매기준율에 환전 비용 0.5%를 더해 계산해요.':'증권사 앱의 평균 매입 환율(실제로 환전한 환율)을 넣어 주세요.';}
+$('xMode').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;xSetMode(b.dataset.v);if(b.dataset.v==='rate')track('fxr_mode_rate');});
+$('xD').min=START;$('xD').max=today;
+/* 입력하면서 천 단위 쉼표(소수 허용 칸은 소수점 유지) */
+function commaInput(el,dec){el.addEventListener('input',()=>{const raw=el.value.replace(/[^0-9.]/g,'');if(!raw)return;
+  const [i,f]=raw.split('.');const n=(+i||0).toLocaleString('en-US');el.value=dec&&f!==undefined?n+'.'+f.slice(0,2):n;});}
+commaInput($('xK'),false);commaInput($('xU'),true);commaInput($('xR'),true);
+function xFail(m){$('xErr').textContent=m;$('xErr').classList.remove('hidden');}
+async function fxrRun(inp,{auto=false}={}){
+  $('xErr').classList.add('hidden');
+  const x1=await PriceAPI.fx(today);if(!x1)return xFail('오늘 환율을 불러오지 못했어요. 잠시 뒤 다시 해 주세요.');
+  let x0=null,r0b,r0e;
+  if(inp.mode==='date'){x0=await PriceAPI.fx(inp.d);if(!x0)return xFail('그 날짜의 환율이 없어요. 다른 날짜를 골라 주세요.');r0b=x0.rate;r0e=r0b*(1+EX_SPREAD);}
+  else{r0e=inp.r;r0b=inp.r/(1+EX_SPREAD);}
+  const o=fxrCompute({K:inp.K,r0b,r0e,U1:inp.U,r1b:x1.rate});
+  /* 나눠 환전: 산 날 90·60·30일 전과 산 날에 1/4씩(날짜로 입력했을 때만) */
+  let split=null;
+  if(inp.mode==='date'){const ds=[90,60,30,0].map(k=>{const d=new Date(inp.d+'T00:00:00Z');d.setUTCDate(d.getUTCDate()-k);return iso(d);});
+    const xs=await Promise.all(ds.map(d=>PriceAPI.fx(d)));
+    if(xs.every(Boolean)){const U0s=xs.reduce((a,x)=>a+(inp.K/4)/(x.rate*(1+EX_SPREAD)),0);split={V:inp.U*(U0s/o.U0)*x1.rate*(1-EX_SPREAD),avg:xs.reduce((a,x)=>a+x.rate,0)/4};}}
+  xLast={inp,o,x0,x1,r0b,split};writeX({...inp,saved:Date.now()});
+  fxrRender(auto);track(auto?'fxr_return':'fxr_calc');
+}
+function fxrRender(auto){
+  const {inp,o,x0,x1,r0b,split}=xLast,W=n=>Math.round(n).toLocaleString('ko-KR');
+  $('xQ').innerHTML=(inp.mode==='date'?`<b>${ymd(x0.date)}</b>에 <b>${korMoney(inp.K)}</b>을 달러로 바꿔 산 미국주식`:`<b>${W(inp.r)}원</b>에 바꾼 <b>${korMoney(inp.K)}</b>어치 미국주식`)+`<br>${ymd(x1.date)} 환율로 팔면`;
+  countUp($('xV'),o.V,won);
+  $('xPL').textContent=`${sgn(o.pl)} (${pct(o.ret)})`;$('xPL').className='delta '+cls(o.pl);
+  $('xMeta').textContent=(FxAPI.live?'실제 환율 반영':'가상 환율(실제 아님)')+` · 평가금액 $${(+inp.U).toLocaleString('en-US')}은 입력한 값`+(auto?' · 저장한 입력으로 오늘 환율 기준 다시 계산했어요':'');
+  $('xWarn').classList.toggle('hidden',FxAPI.live);
+  $('xVerdict').innerHTML=Math.abs(o.fx)<1?'환율 때문에 생긴 손익은 거의 없어요.':o.fx<0?`환율 때문에 <b>${korMoney(-o.fx)}</b> 줄었어요.`:`환율 덕분에 <b>${korMoney(o.fx)}</b> 늘었어요.`;
+  const a=Math.abs(o.stock),b=Math.abs(o.fx),c=Math.abs(o.fee),tt=a+b+c||1;
+  $('xBar').innerHTML=`<i style="width:${a/tt*100}%;background:var(--${o.stock>=0?'up':'down'})"></i><i style="width:${b/tt*100}%;background:var(--${o.fx>=0?'up':'down'});opacity:.45"></i><i style="width:${c/tt*100}%;background:var(--faint)"></i>`;
+  [['xStock',o.stock],['xFx',o.fx],['xFee',o.fee]].forEach(([id,v])=>{$(id).textContent=sgn(v);$(id).className=cls(v);});
+  $('xRates').innerHTML=`${W(r0b)}원 → ${W(x1.rate)}원<small style="display:block;font-weight:400;font-size:12px;color:var(--faint)">${inp.mode==='date'?`매매기준율 · ${ymd(x0.date)} · ${ymd(x1.date)}`:`입력한 환율에서 환전 비용 0.5%를 뺀 값 · ${ymd(x1.date)} 매매기준율`}</small>`;
+  $('xUsd').textContent=pct(o.usdRet);$('xUsd').className=cls(o.usdRet);
+  const now=x1.rate;$('xBep').textContent=`${W(o.bep)}원`;
+  $('xBepTxt').innerHTML=o.pl>=0?`지금 평가금액 그대로라면 환율이 ${W(now)}원에서 이 값까지 내려가도 본전이에요.`
+    :o.bep>now*1.5?`환율만으로 본전이 되려면 지금(${W(now)}원)의 1.5배가 넘는 환율이 필요해요. 환율이 그대로라면 평가금액이 <b style="display:inline;font-size:inherit">${pct(inp.K/o.V-1)}</b> 올라야 해요.`
+    :`지금 평가금액 그대로라면 환율이 <b style="display:inline;font-size:inherit">${W(o.bep-now)}원</b> 더 올라야 본전이에요. 환율이 지금(${W(now)}원) 그대로라면 평가금액이 <b style="display:inline;font-size:inherit">${pct(inp.K/o.V-1)}</b> 올라야 해요.`;
+  $('xAltH').innerHTML=`${won(o.hedged)}<small style="display:block;font-weight:400;font-size:12px" class="${cls(o.hedged-o.V)}">지금보다 ${sgn(o.hedged-o.V)}</small>`;
+  $('xAltSRow').classList.toggle('hidden',!split);
+  if(split){$('xAltS').innerHTML=`${won(split.V)}<small style="display:block;font-weight:400;font-size:12px" class="${cls(split.V-o.V)}">지금보다 ${sgn(split.V-o.V)}</small>`;
+    $('xAltSSub').textContent=`산 날 90·60·30일 전과 산 날 · 평균 매매기준율 ${W(split.avg)}원`;}
+  $('xAlertMsg').classList.add('hidden');
+  $('xOut').classList.remove('hidden');if(!auto)$('xOut').scrollIntoView({behavior:'smooth',block:'start'});
+}
+$('xf').addEventListener('submit',e=>{e.preventDefault();
+  const K=num($('xK').value),U=num($('xU').value),r=num($('xR').value),d=$('xD').value;
+  if(!(K>=10000))return xFail('쓴 돈을 원화로 넣어 주세요(1만원 이상).');
+  if(xMode==='date'&&(!d||d<START||d>today))return xFail(`환전한 날짜를 ${ymd(START)}~${ymd(today)} 사이로 골라 주세요.`);
+  if(xMode==='rate'&&!(r>=500&&r<=3000))return xFail('환율은 1달러당 원화로 넣어 주세요(예: 1,480).');
+  if(!(U>0))return xFail('지금 달러 평가금액을 넣어 주세요.');
+  fxrRun({K,mode:xMode,d,r,U});
+});
+$('xAlert').addEventListener('click',()=>{track('fxr_alert_click');const m=$('xAlertMsg');
+  if(ALERT_FORM_URL){m.innerHTML=`<a href="${ALERT_FORM_URL}" target="_blank" rel="noopener">알림 신청 페이지 열기</a>`;}
+  else{m.textContent='알림 기능은 아직 준비 중이에요. 관심이 있다는 표시만 익명으로 셌어요(이메일 등 개인정보는 받지 않았어요).';}
+  m.classList.remove('hidden');});
+$('xEdit').addEventListener('click',()=>{$('xf').scrollIntoView({behavior:'smooth',block:'start'});$('xK').focus();});
+/* 공유는 금액 대신 비율만 담는다(개인 자산 규모 노출 방지) */
+$('xShare').addEventListener('click',async()=>{if(!xLast)return;track('fxr_share');const o=xLast.o,W=n=>Math.round(n).toLocaleString('ko-KR');
+  const text=`내 미국주식 원화 수익률 ${pct(o.ret)}, 그중 환율 몫 ${pct(o.fx/xLast.inp.K)} · 본전 환율 ${W(o.bep)}원 (daymarket 환율 성적표)`;
+  const url=location.href.split('#')[0];
+  try{if(navigator.share){await navigator.share({title:'환율 성적표',text,url});return;}}catch(_){return;}
+  try{await navigator.clipboard.writeText(text+' '+url);toast('공유 문구를 복사했어요');}catch(_){toast('이 브라우저에서는 공유할 수 없어요');}});
+function fxrOpen(){track('fxr_open');const sv=readX();
+  if(sv&&!xLast){$('xK').value=Math.round(sv.K).toLocaleString('ko-KR');xSetMode(sv.mode==='rate'?'rate':'date');
+    if(sv.d)$('xD').value=sv.d;if(sv.r)$('xR').value=String(sv.r);$('xU').value=(+sv.U).toLocaleString('en-US');
+    if(!xReturned){xReturned=true;fxrRun({K:sv.K,mode:sv.mode,d:sv.d,r:sv.r,U:sv.U},{auto:true});}}
+  else if(!$('xD').value)$('xD').value=yearsAgo(1);}
+$('fxrEntry').addEventListener('click',()=>{track('fxr_entry_home');go('fxr');});
+
 /* 하단 메뉴 */
 function go(v){document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
-  document.querySelectorAll('.view').forEach(x=>x.classList.toggle('active',x.id==='view-'+v));if(v==='saved')paintSaved();window.scrollTo({top:0});}
-document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>go(b.dataset.v)));
+  document.querySelectorAll('.view').forEach(x=>x.classList.toggle('active',x.id==='view-'+v));if(v==='saved')paintSaved();if(v==='fxr')fxrOpen();window.scrollTo({top:0});}
+document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>{track('nav_'+b.dataset.v);go(b.dataset.v);}));
 paintSaved();
 
 </script>
